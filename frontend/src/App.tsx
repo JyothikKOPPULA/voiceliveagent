@@ -6,10 +6,12 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  isRecent?: boolean; // Mark recent messages
 }
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [recentMessages, setRecentMessages] = useState<Message[]>([]); // Only last few messages
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -20,6 +22,7 @@ const App: React.FC = () => {
   const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('');
+  const [showFullHistory, setShowFullHistory] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -30,7 +33,25 @@ const App: React.FC = () => {
 
   useEffect(() => {
     scrollToBottom();
+  }, [messages, recentMessages]);
+
+  // Keep only recent messages (last 4 exchanges)
+  useEffect(() => {
+    const maxRecentMessages = 8; // 4 user + 4 assistant messages
+    setRecentMessages(messages.slice(-maxRecentMessages));
   }, [messages]);
+
+  // Auto-cleanup old messages every 10 minutes (optional)
+  useEffect(() => {
+    const autoCleanup = setInterval(() => {
+      if (messages.length > 20) {
+        console.log('🧹 Auto-cleaning old messages to improve performance');
+        setMessages(prev => prev.slice(-12)); // Keep only last 12 messages
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+
+    return () => clearInterval(autoCleanup);
+  }, [messages.length]);
 
   const startSession = async () => {
     try {
@@ -73,22 +94,44 @@ const App: React.FC = () => {
         // User finished speaking
         addMessage('user', message.transcript);
         console.log('User said:', message.transcript);
+        // Clear any previous assistant streaming message when user speaks
+        setCurrentAssistantMessage('');
         break;
         
       case 'assistant_transcript_delta':
-        // Real-time streaming of assistant's speech
-        setCurrentAssistantMessage(prev => prev + (message.delta || ''));
+        // Real-time streaming of assistant's speech - accumulate for current response
+        setCurrentAssistantMessage(prev => {
+          // If this is the first delta of a new response, start fresh
+          if (prev === '' || message.delta === prev) {
+            return message.delta || '';
+          }
+          return prev + (message.delta || '');
+        });
         break;
         
       case 'assistant_transcript_done':
-        // Assistant finished speaking
-        if (currentAssistantMessage) {
-          addMessage('assistant', currentAssistantMessage);
-          setCurrentAssistantMessage('');
-        } else if (message.transcript) {
-          addMessage('assistant', message.transcript);
+        // Assistant finished speaking - use final transcript and clear streaming
+        const finalTranscript = message.transcript || currentAssistantMessage;
+        if (finalTranscript) {
+          addMessage('assistant', finalTranscript);
         }
-        console.log('Assistant said:', message.transcript);
+        setCurrentAssistantMessage(''); // Clear streaming message
+        console.log('Assistant said:', finalTranscript);
+        break;
+        
+      case 'response.audio.delta':
+      case 'assistant_audio_delta':
+        // Avatar audio response started - clear previous streaming text
+        break;
+        
+      case 'speech_started':
+        // User started speaking - clear any assistant streaming
+        setCurrentAssistantMessage('');
+        break;
+        
+      case 'response_done':
+        // Response completely finished - ensure streaming is cleared
+        setCurrentAssistantMessage('');
         break;
         
       case 'avatar_connecting':
@@ -167,9 +210,17 @@ const App: React.FC = () => {
       id: Date.now().toString(),
       role,
       content,
-      timestamp: new Date()
+      timestamp: new Date(),
+      isRecent: true
     };
     setMessages(prev => [...prev, newMessage]);
+  };
+
+  const clearConversationHistory = () => {
+    setMessages([]);
+    setRecentMessages([]);
+    setCurrentAssistantMessage(''); // Clear any streaming assistant message
+    console.log('🧹 Conversation history cleared');
   };
 
   const disconnectAvatar = async () => {
@@ -510,6 +561,11 @@ const App: React.FC = () => {
             )}
           </div>
           <div className="header-buttons">
+            {isConnected && messages.length > 0 && (
+              <button onClick={clearConversationHistory} className="btn-clear" title="Clear conversation history">
+                🧹 Clear
+              </button>
+            )}
             {!isConnected ? (
               <button onClick={startSession} className="btn-primary">
                 Start Session
@@ -547,42 +603,67 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* User Transcription */}
+            {/* User Transcription - Show only most recent */}
             <div className="transcription-box user-transcription">
               <div className="transcription-header">
                 <span className="transcription-icon">👤</span>
                 <span className="transcription-title">User</span>
               </div>
               <div className="transcription-content">
-                {messages.filter(m => m.role === 'user').slice(-1).map(m => (
-                  <div key={m.id} className="transcript-text">{m.content}</div>
-                ))}
-                {!messages.some(m => m.role === 'user') && (
-                  <div className="transcript-placeholder">Start talking...</div>
-                )}
+                {(() => {
+                  const lastUserMessage = recentMessages
+                    .filter(m => m.role === 'user')
+                    .slice(-1)[0];
+                  
+                  return lastUserMessage ? (
+                    <div key={lastUserMessage.id} className="transcript-text">
+                      {lastUserMessage.content}
+                      <div className="transcript-timestamp">
+                        {lastUserMessage.timestamp.toLocaleTimeString()}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="transcript-placeholder">Start talking...</div>
+                  );
+                })()}
               </div>
             </div>
           </div>
 
           <div className="participant-container">
-            {/* Avatar Transcription */}
+            {/* Avatar Transcription - Show only most recent response */}
             <div className="transcription-box avatar-transcription">
               <div className="transcription-header">
                 <span className="transcription-icon">🤖</span>
                 <span className="transcription-title">Avatar</span>
+                {currentAssistantMessage && (
+                  <span className="speaking-indicator">🔊</span>
+                )}
               </div>
               <div className="transcription-content">
-                {currentAssistantMessage && (
+                {currentAssistantMessage ? (
                   <div className="transcript-text streaming">
                     {currentAssistantMessage}
                     <span className="cursor">|</span>
                   </div>
-                )}
-                {!currentAssistantMessage && messages.filter(m => m.role === 'assistant').slice(-1).map(m => (
-                  <div key={m.id} className="transcript-text">{m.content}</div>
-                ))}
-                {!currentAssistantMessage && !messages.some(m => m.role === 'assistant') && (
-                  <div className="transcript-placeholder">Waiting for response...</div>
+                ) : (
+                  // Show only the VERY LAST assistant message
+                  (() => {
+                    const lastAssistantMessage = recentMessages
+                      .filter(m => m.role === 'assistant')
+                      .slice(-1)[0];
+                    
+                    return lastAssistantMessage ? (
+                      <div key={lastAssistantMessage.id} className="transcript-text">
+                        {lastAssistantMessage.content}
+                        <div className="transcript-timestamp">
+                          {lastAssistantMessage.timestamp.toLocaleTimeString()}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="transcript-placeholder">Waiting for response...</div>
+                    );
+                  })()
                 )}
               </div>
             </div>
@@ -619,14 +700,28 @@ const App: React.FC = () => {
           </div>
         </div>
 
-          {/* Chat History Section - Scrollable */}
+          {/* Chat History Section - Show Recent Only */}
           <div className="chat-section">
             <div className="chat-header">
               <span className="chat-icon">💬</span>
-              <span className="chat-title">Conversation History</span>
+              <span className="chat-title">Recent Conversation</span>
+              <div className="chat-controls">
+                <button 
+                  onClick={() => setShowFullHistory(!showFullHistory)} 
+                  className="btn-toggle"
+                  title={showFullHistory ? "Show recent only" : "Show full history"}
+                >
+                  {showFullHistory ? '📋 Recent' : '📜 Full'}
+                </button>
+                {messages.length > 8 && (
+                  <span className="message-count">
+                    {showFullHistory ? messages.length : recentMessages.length} messages
+                  </span>
+                )}
+              </div>
             </div>
             <div className="chat-messages">
-              {messages.map((message) => (
+              {(showFullHistory ? messages : recentMessages).map((message) => (
                 <div key={message.id} className={`message ${message.role}`}>
                   <div className="message-header">
                     <span className="role">

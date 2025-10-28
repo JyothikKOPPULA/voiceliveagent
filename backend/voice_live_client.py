@@ -53,6 +53,8 @@ class VoiceLiveSession:
         self._avatar_future: Optional[asyncio.Future] = None
         self._connected_event = asyncio.Event()
         self._avatar_connected = False  # Track avatar connection state
+        self._current_detected_language = None  # Track automatically detected language
+        self._language_detection_confidence = 0.0  # Confidence score for language detection
 
         # Configuration from environment variables
         self._endpoint = os.getenv("AZURE_VOICE_LIVE_ENDPOINT")
@@ -72,6 +74,7 @@ class VoiceLiveSession:
 
         self._session_config = {
             "modalities": ["text", "audio", "avatar"],
+            "input_audio_sampling_rate": 24000,
             "turn_detection": {
                 "type": "azure_semantic_vad",
                 "threshold": 0.3,
@@ -83,6 +86,7 @@ class VoiceLiveSession:
                     "threshold": 0.01,
                     "timeout": 2,
                 },
+                "auto_language_detection": True,  # Enable automatic language detection
             },
             "input_audio_noise_reduction": {
                 "type": "azure_deep_noise_suppression"
@@ -90,11 +94,13 @@ class VoiceLiveSession:
             "input_audio_echo_cancellation": {
                 "type": "server_echo_cancellation"
             },
+            "input_audio_transcription": self._build_transcription_config(),
             "avatar": self._build_avatar_config(),
             "voice": {
                 "name": os.getenv("AZURE_TTS_VOICE"),
                 "type": "azure-standard",
                 "temperature": 0.8,
+                "auto_language_matching": True,  # Auto-match voice to detected input language
             },
         }
         
@@ -183,6 +189,113 @@ class VoiceLiveSession:
                 {"urls": [url.strip() for url in ice_urls.split(",") if url.strip()]}
             ]
         return config
+
+    def _build_transcription_config(self) -> Dict[str, Any]:
+        """
+        🌍 Multi-Language Support: Build transcription configuration according to Azure Voice Live API
+        Supports three modes:
+        1. Automatic multilingual (default) - leave language empty for multilingual model
+        2. Single language configuration 
+        3. Multilingual configuration with up to 10 defined languages
+        """
+        # Get language configuration from environment
+        languages = os.getenv("AZURE_VOICE_TRANSCRIPTION_LANGUAGES", "")
+        transcription_mode = os.getenv("AZURE_VOICE_TRANSCRIPTION_MODE", "auto")  # auto, single, multi
+        
+        # Extended language mapping including Azure Voice Live supported languages
+        language_config = {
+            # Multilingual model supported languages (Azure Voice Live default)
+            "zh-CN": {"name": "Chinese (China)", "voice": "zh-CN-XiaoxiaoNeural"},
+            "en-AU": {"name": "English (Australia)", "voice": "en-AU-NatashaNeural"},
+            "en-CA": {"name": "English (Canada)", "voice": "en-CA-ClaraNeural"},
+            "en-IN": {"name": "English (India)", "voice": "en-IN-NeerjaNeural"},
+            "en-GB": {"name": "English (United Kingdom)", "voice": "en-GB-SoniaNeural"},
+            "en-US": {"name": "English (United States)", "voice": "en-US-AriaNeural"},
+            "fr-CA": {"name": "French (Canada)", "voice": "fr-CA-SylvieNeural"},
+            "fr-FR": {"name": "French (France)", "voice": "fr-FR-DeniseNeural"},
+            "de-DE": {"name": "German (Germany)", "voice": "de-DE-KatjaNeural"},
+            "hi-IN": {"name": "Hindi (India)", "voice": "hi-IN-SwaraNeural"},
+            "it-IT": {"name": "Italian (Italy)", "voice": "it-IT-ElsaNeural"},
+            "ja-JP": {"name": "Japanese (Japan)", "voice": "ja-JP-NanamiNeural"},
+            "ko-KR": {"name": "Korean (Korea)", "voice": "ko-KR-SunHiNeural"},
+            "es-MX": {"name": "Spanish (Mexico)", "voice": "es-MX-DaliaNeural"},
+            "es-ES": {"name": "Spanish (Spain)", "voice": "es-ES-ElviraNeural"},
+            
+            # Additional Indian languages for better regional support
+            "ta-IN": {"name": "Tamil (India)", "voice": "ta-IN-PallaviNeural"},
+            "te-IN": {"name": "Telugu (India)", "voice": "te-IN-ShrutiNeural"},
+            "bn-IN": {"name": "Bengali (India)", "voice": "bn-IN-BashkarNeural"},
+            "kn-IN": {"name": "Kannada (India)", "voice": "kn-IN-SapnaNeural"},
+            "ml-IN": {"name": "Malayalam (India)", "voice": "ml-IN-SobhanaNeural"},
+            "mr-IN": {"name": "Marathi (India)", "voice": "mr-IN-AarohiNeural"},
+            "gu-IN": {"name": "Gujarati (India)", "voice": "gu-IN-DhwaniNeural"},
+        }
+        
+        # Build transcription configuration based on mode
+        if transcription_mode == "auto" or not languages:
+            # Mode 1: Automatic multilingual configuration (default)
+            logger.info("🌍 Using automatic multilingual configuration (default)")
+            transcription_config = {
+                "model": "azure-speech",
+                "language": "",  # Empty for automatic multilingual model
+                "mode": "automatic_multilingual",
+                "supported_languages": [
+                    {
+                        "code": code,
+                        "name": config["name"],
+                        "voice": config["voice"]
+                    }
+                    for code, config in language_config.items()
+                    if code in ["zh-CN", "en-AU", "en-CA", "en-IN", "en-GB", "en-US", 
+                               "fr-CA", "fr-FR", "de-DE", "hi-IN", "it-IT", "ja-JP", 
+                               "ko-KR", "es-MX", "es-ES"]  # Default multilingual model languages
+                ]
+            }
+        else:
+            # Parse and validate specified languages
+            language_list = [lang.strip() for lang in languages.split(",") if lang.strip()]
+            supported_languages = []
+            
+            # Validate languages (max 10 for multi-language mode)
+            if len(language_list) > 10:
+                logger.warning("⚠️ Maximum 10 languages supported, truncating list")
+                language_list = language_list[:10]
+            
+            for lang in language_list:
+                if lang in language_config:
+                    supported_languages.append(lang)
+                    logger.info("🌍 Added language support: %s (%s)", 
+                              language_config[lang]["name"], lang)
+                else:
+                    logger.warning("⚠️ Unsupported language code: %s", lang)
+            
+            # Fallback to default if no valid languages
+            if not supported_languages:
+                supported_languages = ["en-IN", "hi-IN"]
+                logger.info("🌍 No valid languages found, using default: English (India), Hindi (India)")
+            
+            # Mode 2 or 3: Single or multiple language configuration
+            mode = "single_language" if len(supported_languages) == 1 else "multi_language"
+            logger.info("🌍 Using %s configuration with %d languages", mode, len(supported_languages))
+            
+            transcription_config = {
+                "model": "azure-speech",
+                "language": ",".join(supported_languages),  # Comma-separated for specific languages
+                "mode": mode,
+                "supported_languages": [
+                    {
+                        "code": lang,
+                        "name": language_config[lang]["name"],
+                        "voice": language_config[lang]["voice"]
+                    }
+                    for lang in supported_languages
+                ]
+            }
+        
+        logger.info("🌍 Transcription configured in '%s' mode with %d languages", 
+                   transcription_config["mode"], len(transcription_config["supported_languages"]))
+        
+        return transcription_config
 
     async def connect(self) -> None:
         async with self._lock:
@@ -405,6 +518,188 @@ class VoiceLiveSession:
         finally:
             self._avatar_future = None
 
+    async def switch_language(self, language_code: str) -> bool:
+        """
+        🌍 Switch the active language for voice and transcription
+        
+        Args:
+            language_code: Language code (e.g., 'en-IN', 'hi-IN', 'ta-IN')
+            
+        Returns:
+            bool: True if language switch was successful
+        """
+        await self._connected_event.wait()
+        await self._ensure_connection()
+        
+        # Get supported languages from transcription config
+        transcription_config = self._session_config.get("input_audio_transcription", {})
+        supported_languages = transcription_config.get("supported_languages", [])
+        
+        # Find the language configuration
+        language_info = None
+        for lang in supported_languages:
+            if lang["code"] == language_code:
+                language_info = lang
+                break
+        
+        if not language_info:
+            logger.error("🌍 Language %s not supported. Available: %s", 
+                        language_code, [lang["code"] for lang in supported_languages])
+            return False
+        
+        try:
+            # Update voice configuration
+            voice_update = {
+                "voice": {
+                    "name": language_info["voice"],
+                    "type": "azure-standard",
+                    "temperature": 0.8,
+                }
+            }
+            
+            # Update transcription language
+            transcription_update = {
+                "input_audio_transcription": {
+                    "model": "azure-speech",  
+                    "language": language_code,
+                    "primary_language": language_code
+                }
+            }
+            
+            # Send session updates
+            await self._send("session.update", {
+                "session": {**voice_update, **transcription_update}
+            })
+            
+            # Update local configuration
+            self._session_config["voice"]["name"] = language_info["voice"]
+            self._session_config["input_audio_transcription"]["language"] = language_code
+            
+            logger.info("🌍 Language switched to: %s (%s) with voice: %s", 
+                       language_info["name"], language_code, language_info["voice"])
+            return True
+            
+        except Exception as e:
+            logger.error("🌍 Failed to switch language to %s: %s", language_code, str(e))
+            return False
+
+    def get_supported_languages(self) -> list:
+        """
+        🌍 Get list of supported languages
+        
+        Returns:
+            list: List of language configurations with code, name, and voice
+        """
+        transcription_config = self._session_config.get("input_audio_transcription", {})
+        return transcription_config.get("supported_languages", [])
+
+    def get_current_language(self) -> str:
+        """
+        🌍 Get the current active language code
+        
+        Returns:
+            str: Current language code (e.g., 'en-IN')
+        """
+        transcription_config = self._session_config.get("input_audio_transcription", {})
+        current_language = transcription_config.get("language", "en-IN")
+        
+        # If multiple languages are set, return the first one as primary
+        if "," in current_language:
+            return current_language.split(",")[0].strip()
+        
+        return current_language
+
+    async def _handle_language_detection(self, detected_language: str, confidence: float) -> None:
+        """
+        🌍 Handle automatic language detection and switching
+        
+        Args:
+            detected_language: The language code detected by Azure Speech
+            confidence: Confidence score (0.0 to 1.0)
+        """
+        # Update current detected language tracking
+        self._current_detected_language = detected_language
+        self._language_detection_confidence = confidence
+        
+        logger.info("🌍 Language detected: %s (confidence: %.2f)", detected_language, confidence)
+        
+        # Get current voice language
+        current_voice_lang = self._session_config["voice"]["name"]
+        transcription_config = self._session_config.get("input_audio_transcription", {})
+        supported_languages = transcription_config.get("supported_languages", [])
+        
+        # Find if detected language is supported and different from current
+        target_language_info = None
+        for lang in supported_languages:
+            if lang["code"] == detected_language:
+                target_language_info = lang
+                break
+        
+        if target_language_info and current_voice_lang != target_language_info["voice"]:
+            # Auto-switch voice to match detected input language
+            success = await self._auto_switch_voice_language(detected_language, target_language_info)
+            if success:
+                await self._broadcast({
+                    "type": "language_auto_switched",
+                    "from_language": self.get_current_language(),
+                    "to_language": detected_language,
+                    "language_name": target_language_info["name"],
+                    "confidence": confidence,
+                    "voice": target_language_info["voice"]
+                })
+        else:
+            logger.debug("🌍 Language %s already active or not supported", detected_language)
+
+    async def _auto_switch_voice_language(self, language_code: str, language_info: dict) -> bool:
+        """
+        🌍 Automatically switch voice language based on detected input
+        
+        Args:
+            language_code: Language code to switch to
+            language_info: Language configuration info
+            
+        Returns:
+            bool: True if switch was successful
+        """
+        try:
+            # Update voice configuration for response
+            voice_update = {
+                "voice": {
+                    "name": language_info["voice"],
+                    "type": "azure-standard",
+                    "temperature": 0.8,
+                }
+            }
+            
+            # Send session update for voice only (keep transcription multi-language)
+            await self._send("session.update", {
+                "session": voice_update
+            })
+            
+            # Update local voice configuration
+            self._session_config["voice"]["name"] = language_info["voice"]
+            
+            logger.info("🌍 Auto-switched voice to: %s (%s) with voice: %s", 
+                       language_info["name"], language_code, language_info["voice"])
+            return True
+            
+        except Exception as e:
+            logger.error("🌍 Failed to auto-switch voice to %s: %s", language_code, str(e))
+            return False
+
+    def get_detected_language_info(self) -> dict:
+        """
+        🌍 Get information about the currently detected language
+        
+        Returns:
+            dict: Information about detected language and confidence
+        """
+        return {
+            "detected_language": self._current_detected_language,
+            "confidence": self._language_detection_confidence,
+            "current_voice_language": self.get_current_language()
+        }
+
     async def _receive_loop(self) -> None:
         ws = self.ws
         if ws is None:
@@ -442,13 +737,22 @@ class VoiceLiveSession:
                         }
                     )
                 elif event_type == "conversation.item.input_audio_transcription.completed":
-                    await self._broadcast(
-                        {
-                            "type": "user_transcript_completed",
-                            "transcript": event.get("transcript"),
-                            "item_id": event.get("item_id"),
-                        }
-                    )
+                    transcript_data = {
+                        "type": "user_transcript_completed",
+                        "transcript": event.get("transcript"),
+                        "item_id": event.get("item_id"),
+                    }
+                    
+                    # 🌍 Handle automatic language detection
+                    detected_language = event.get("detected_language")
+                    language_confidence = event.get("language_confidence", 0.0)
+                    
+                    if detected_language and language_confidence > 0.7:  # High confidence threshold
+                        await self._handle_language_detection(detected_language, language_confidence)
+                        transcript_data["detected_language"] = detected_language
+                        transcript_data["language_confidence"] = language_confidence
+                    
+                    await self._broadcast(transcript_data)
                 elif event_type == "input_audio_buffer.speech_started":
                     await self._broadcast({"type": "speech_started"})
                 elif event_type == "input_audio_buffer.speech_stopped":
@@ -480,9 +784,35 @@ class VoiceLiveSession:
                         self._avatar_future.cancel()
                         self._avatar_future = None
                     await self._broadcast({"type": "avatar_disconnected"})
+                elif event_type == "input_audio_buffer.language_detected":
+                    # 🌍 Handle language detection events from Azure Speech
+                    detected_lang = event.get("language")
+                    confidence = event.get("confidence", 0.0)
+                    if detected_lang and confidence > 0.6:
+                        await self._handle_language_detection(detected_lang, confidence)
+                    await self._broadcast({
+                        "type": "language_detected",
+                        "language": detected_lang,
+                        "confidence": confidence,
+                        "payload": event
+                    })
+                elif event_type == "conversation.item.input_audio_transcription.delta":
+                    # Handle real-time transcription with language info
+                    transcript_delta = {
+                        "type": "user_transcript_delta",
+                        "delta": event.get("delta"),
+                        "item_id": event.get("item_id"),
+                    }
+                    # Check for language information in delta
+                    if "language" in event:
+                        transcript_delta["detected_language"] = event.get("language")
+                    await self._broadcast(transcript_delta)
                 elif event_type == "response.done":
                     await self._broadcast({"type": "response_done", "payload": event})
                 else:
+                    # 🌍 Log unknown events that might contain language information
+                    if "language" in event or "detected" in str(event).lower():
+                        logger.info("🌍 Received potential language event: %s", event_type)
                     await self._broadcast({"type": "event", "payload": event})
                     
         except Exception as exc:  # pylint: disable=broad-except

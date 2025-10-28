@@ -114,6 +114,13 @@
   letter-spacing: 0.5px;
 }
 
+.speaking-indicator {
+  margin-left: auto;
+  font-size: 0.9rem;
+  animation: pulse 1.5s ease-in-out infinite;
+  color: #1976d2;
+}
+
 .transcription-content {
   flex: 1;
   display: flex;
@@ -126,10 +133,22 @@
 .transcript-text {
   color: #37474f;
   font-weight: 400;
+  position: relative;
+}
+
+.transcript-timestamp {
+  font-size: 0.7rem;
+  color: rgba(0, 0, 0, 0.4);
+  margin-top: 0.25rem;
+  font-style: italic;
 }
 
 .transcript-text.streaming {
   animation: fadeIn 0.3s ease;
+  background: rgba(25, 118, 210, 0.05);
+  padding: 0.5rem;
+  border-radius: 6px;
+  border-left: 3px solid #1976d2;
 }
 
 .transcript-placeholder {
@@ -141,6 +160,8 @@
 .cursor {
   animation: blink 1s infinite;
   margin-left: 2px;
+  color: #1976d2;
+  font-weight: bold;
 }
 
 /* User and Avatar Video Boxes Row */
@@ -512,6 +533,57 @@
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-clear {
+  background: rgba(255, 152, 0, 0.8);
+  color: white;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-clear:hover:not(:disabled) {
+  background: rgba(255, 152, 0, 1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
+}
+
+.chat-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+}
+
+.btn-toggle {
+  background: rgba(25, 118, 210, 0.1);
+  color: #1976d2;
+  border: 1px solid rgba(25, 118, 210, 0.3);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-toggle:hover:not(:disabled) {
+  background: rgba(25, 118, 210, 0.2);
+  transform: translateY(-1px);
+}
+
+.message-count {
+  font-size: 0.75rem;
+  color: #666;
+  font-weight: normal;
+  padding: 0.2rem 0.5rem;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
 }
 
 /* Responsive design */

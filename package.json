@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^9.4.0",
+    "framer-motion": "^12.23.24",
+    "react-router-dom": "^7.9.4",
+    "three": "^0.180.0",
+    "three-stdlib": "^2.36.0"
+  }
+}

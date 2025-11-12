@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover - older websockets versions
     WebSocketState = None  # type: ignore[assignment]
 
 from dotenv import load_dotenv
+from config import agent_config
 
 logger = logging.getLogger(__name__)
 
@@ -56,17 +57,20 @@ class VoiceLiveSession:
         self._current_detected_language = None  # Track automatically detected language
         self._language_detection_confidence = 0.0  # Confidence score for language detection
 
-        # Configuration from environment variables
+        # Configuration from environment variables and config.py
         self._endpoint = os.getenv("AZURE_VOICE_LIVE_ENDPOINT")
-        self._agent_id = os.getenv("AZURE_VOICE_LIVE_AGENT_ID")
         self._agent_connection_string = os.getenv("AZURE_VOICE_LIVE_AGENT_CONNECTION_STRING")
         self._api_version = os.getenv("AZURE_VOICE_LIVE_API_VERSION")
+        
+        # Get agent ID from config.py instead of .env
+        current_agent = agent_config.get_current_agent()
+        self._agent_id = current_agent["agent_id"] if current_agent else None
         
         # Validate required environment variables
         if not self._endpoint:
             raise ValueError("AZURE_VOICE_LIVE_ENDPOINT environment variable is required")
         if not self._agent_id:
-            raise ValueError("AZURE_VOICE_LIVE_AGENT_ID environment variable is required")
+            raise ValueError("No active agent configured. Please create and select an agent first.")
         if not self._agent_connection_string:
             raise ValueError("AZURE_VOICE_LIVE_AGENT_CONNECTION_STRING environment variable is required")
         if not self._api_version:

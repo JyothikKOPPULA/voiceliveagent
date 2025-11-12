@@ -1,0 +1,25 @@
+{
+  "agents": {
+    "asst_2kUFh7Et1bvLxWB4ijYFi4NR": {
+      "agent_id": "asst_2kUFh7Et1bvLxWB4ijYFi4NR",
+      "model": "gpt-4o-mini",
+      "name": "voice-agent",
+      "instructions": "You are a loan assistant agent anser only loan related queries",
+      "created_at": "2025-11-07T13:18:07.735668",
+      "last_used": "2025-11-07T13:18:07.735676"
+    },
+    "asst_9kIFIc0RjmV8JSDdkZMsXwHx": {
+      "agent_id": "asst_9kIFIc0RjmV8JSDdkZMsXwHx",
+      "model": "gpt-4o-mini",
+      "name": "voice-agent",
+      "instructions": "uyou are insurance agent answer only insurance queries",
+      "created_at": "2025-11-07T13:19:06.263978",
+      "last_used": "2025-11-07T13:19:06.263994"
+    }
+  },
+  "current_agent_id": "asst_9kIFIc0RjmV8JSDdkZMsXwHx",
+  "metadata": {
+    "created_at": "2025-11-07T13:17:43.337274",
+    "last_updated": "2025-11-07T13:19:06.264007"
+  }
+}

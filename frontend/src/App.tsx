@@ -9,6 +9,13 @@ interface Message {
   isRecent?: boolean; // Mark recent messages
 }
 
+interface Config {
+  model: string;
+  agent_name: string;
+  instructions: string;
+  agent_id: string;
+}
+
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [recentMessages, setRecentMessages] = useState<Message[]>([]); // Only last few messages
@@ -22,10 +29,20 @@ const App: React.FC = () => {
   const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState<string>('');
-  const [showFullHistory, setShowFullHistory] = useState(false);
+  // Removed unused setShowFullHistory to fix warning
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  const [config, setConfig] = useState<Config>({
+    model: 'gpt-4o-mini',
+    agent_name: 'voice-agent',
+    instructions: 'You are an AI Voice Assistant designed to have natural conversations with users. You should respond in a friendly, helpful manner and provide accurate information. When users greet you, respond warmly and ask how you can help them today. Keep your responses conversational and engaging.',
+    agent_id: ''
+  });
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [agentStatus, setAgentStatus] = useState({ has_agent: false, ready_for_session: false });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -53,13 +70,61 @@ const App: React.FC = () => {
     return () => clearInterval(autoCleanup);
   }, [messages.length]);
 
+  // Load initial configuration from backend - only when starting session
+  const loadConfig = async () => {
+    if (configLoaded) return; // Don't reload if already loaded
+    
+    try {
+      // Load config and status in parallel
+      const [configResponse, statusResponse] = await Promise.all([
+        fetch('/api/config'),
+        fetch('/api/config/status')
+      ]);
+      
+      if (configResponse.ok) {
+        const backendConfig = await configResponse.json();
+        setConfig({
+          model: backendConfig.model || 'gpt-4o-mini',
+          agent_name: backendConfig.agent_name || 'voice-agent',
+          instructions: backendConfig.instructions || 'You are an AI Voice Assistant designed to have natural conversations with users.',
+          agent_id: backendConfig.agent_id || ''
+        });
+      }
+      
+      if (statusResponse.ok) {
+        const status = await statusResponse.json();
+        setAgentStatus(status);
+      }
+      
+      setConfigLoaded(true);
+    } catch (error) {
+      console.error('Failed to load config:', error);
+      setConfigLoaded(true); // Mark as loaded even if failed to avoid retry loops
+    }
+  };
+
+  // Update configuration locally only (for real-time typing)
+  const updateConfig = (updates: Partial<Config>) => {
+    const newConfig = { ...config, ...updates };
+    setConfig(newConfig);
+  };
+
   const startSession = async () => {
     try {
+      // Load configuration only when starting session
+      await loadConfig();
+      
+      // Check if agent is configured
+      if (!config.agent_id) {
+        alert('Please create an agent first by configuring and saving your agent settings.');
+        return;
+      }
+      
       const response = await fetch('/api/session', { method: 'POST' });
       const data = await response.json();
       setSessionId(data.session_id);
 
-      // Connect WebSocket
+      // Connect WebSocket - use proxy on port 3000 which forwards to backend on port 8000
       const websocket = new WebSocket(`ws://localhost:3000/api/ws/${data.session_id}`);
       
       websocket.onopen = () => {
@@ -549,221 +614,1167 @@ const App: React.FC = () => {
     }
   };
 
+  const saveConfiguration = async () => {
+    try {
+      const response = await fetch('/api/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: config.model,
+          agent_name: config.agent_name,
+          instructions: config.instructions
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Agent configuration result:', result);
+        
+        // Update config with the agent ID
+        setConfig(prev => ({ ...prev, agent_id: result.agent_id }));
+        
+        // Update agent status
+        setAgentStatus({ has_agent: true, ready_for_session: true });
+        
+        alert(result.message);
+      } else {
+        const error = await response.json();
+        throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Failed to save configuration:', error);
+      alert(`Failed to save configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>🎙️ Contact Center </h1>
-        <div className="header-controls">
-          <div className="status">
-            Status: {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
-            {isConnected && (
-              <span> | Avatar: {avatarConnected ? '👤 Connected' : '👻 Disconnected'}</span>
-            )}
-          </div>
-          <div className="header-buttons">
-            {isConnected && messages.length > 0 && (
-              <button onClick={clearConversationHistory} className="btn-clear" title="Clear conversation history">
-                🧹 Clear
-              </button>
-            )}
-            {!isConnected ? (
-              <button onClick={startSession} className="btn-primary">
-                Start Session
-              </button>
-            ) : avatarLoading ? (
-              <button disabled className="btn-secondary">
-                Connecting Avatar...
-              </button>
-            ) : avatarConnected ? (
-              <button onClick={disconnectAvatar} className="btn-secondary">
-                Disconnect Avatar
-              </button>
-            ) : (
-              <button onClick={connectAvatar} className="btn-secondary">
-                Connect Avatar
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="app-main">
-        {/* Top Section: User, User Transcription, Avatar Transcription, Avatar */}
-        <div className="top-section">
-          <div className="participant-container">
-            {/* User Box */}
-            <div className="user-video-box">
-              <div className="box-label">User</div>
-              <div className="user-profile-circle">
-                <svg viewBox="0 0 100 100" className="user-icon-svg">
-                  <circle cx="50" cy="50" r="50" fill="#7B9AB8"/>
-                  <circle cx="50" cy="35" r="18" fill="#5A7A98"/>
-                  <path d="M 15 85 Q 15 60 50 60 Q 85 60 85 85 Z" fill="#5A7A98"/>
-                </svg>
-              </div>
-            </div>
-
-            {/* User Transcription - Show only most recent */}
-            <div className="transcription-box user-transcription">
-              <div className="transcription-header">
-                <span className="transcription-icon">👤</span>
-                <span className="transcription-title">User</span>
-              </div>
-              <div className="transcription-content">
-                {(() => {
-                  const lastUserMessage = recentMessages
-                    .filter(m => m.role === 'user')
-                    .slice(-1)[0];
-                  
-                  return lastUserMessage ? (
-                    <div key={lastUserMessage.id} className="transcript-text">
-                      {lastUserMessage.content}
-                      <div className="transcript-timestamp">
-                        {lastUserMessage.timestamp.toLocaleTimeString()}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="transcript-placeholder">Start talking...</div>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-
-          <div className="participant-container">
-            {/* Avatar Transcription - Show only most recent response */}
-            <div className="transcription-box avatar-transcription">
-              <div className="transcription-header">
-                <span className="transcription-icon">🤖</span>
-                <span className="transcription-title">Avatar</span>
-                {currentAssistantMessage && (
-                  <span className="speaking-indicator">🔊</span>
+    <>
+      <style>{`
+        html, body, #root {
+          background: #ffffff !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          min-height: 100vh !important;
+          height: 100% !important;
+          overflow-x: hidden !important;
+        }
+        
+        /* Force ALL elements to avoid colored backgrounds */
+        * {
+          box-sizing: border-box;
+        }
+        
+        *:not(input):not(textarea):not(select) {
+          background-color: transparent !important;
+        }
+        
+        /* Ensure entire page is covered */
+        body::before {
+          content: '';
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 200vh;
+          background: #ffffff;
+          z-index: -1000;
+        }
+        
+        /* Additional coverage for scrolling */
+        html::before {
+          content: '';
+          position: fixed;
+          top: -100vh;
+          left: -100vw;
+          width: 300vw;
+          height: 300vh;
+          background: #ffffff;
+          z-index: -2000;
+        }
+      `}</style>
+      <div style={{
+        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        background: '#ffffff',
+        minHeight: '100vh',
+        height: '100%',
+        color: '#1a1a1a',
+        position: 'relative'
+      }}>
+      {/* Main Container - 2 Column Layout */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 400px',
+        height: '100vh',
+        minHeight: '100vh',
+        gap: 0,
+        background: '#ffffff'
+      }}>
+        
+        {/* Left Column - Main App */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          background: '#f8fafc',
+          borderRight: '1px solid #e2e8f0'
+        }}>
+          
+          {/* Header */}
+          <div style={{
+            padding: '24px 32px',
+            background: '#ffffff',
+            borderBottom: '1px solid #e2e8f0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
+          }}>
+            <h1 style={{
+              fontSize: '28px',
+              fontWeight: '700',
+              margin: 0,
+              color: '#2563eb',
+              letterSpacing: '-0.5px'
+            }}>
+              Contact Center
+            </h1>
+            
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 18px',
+                background: isConnected ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                border: isConnected ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '25px',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: isConnected ? '#16a34a' : '#dc2626',
+                boxShadow: isConnected 
+                  ? '0 4px 6px -1px rgba(34, 197, 94, 0.1)' 
+                  : '0 4px 6px -1px rgba(239, 68, 68, 0.1)',
+                transition: 'all 0.3s ease'
+              }}>
+                <div style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: isConnected ? '#22c55e' : '#ef4444'
+                }} />
+                <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+                {isConnected && avatarConnected && (
+                  <span style={{ color: '#2563eb' }}>• Avatar Active</span>
                 )}
               </div>
-              <div className="transcription-content">
-                {currentAssistantMessage ? (
-                  <div className="transcript-text streaming">
-                    {currentAssistantMessage}
-                    <span className="cursor">|</span>
+              
+              <button 
+                onClick={startSession}
+                disabled={isConnected || !config.agent_id}
+                style={{
+                  padding: '12px 24px',
+                  background: isConnected 
+                    ? 'rgba(148, 163, 184, 0.1)' 
+                    : !config.agent_id
+                    ? 'rgba(148, 163, 184, 0.1)'
+                    : 'linear-gradient(45deg, #3b82f6, #1d4ed8)',
+                  border: 'none',
+                  borderRadius: '12px',
+                  color: (isConnected || !config.agent_id) ? '#64748b' : 'white',
+                  fontWeight: '600',
+                  fontSize: '14px',
+                  cursor: (isConnected || !config.agent_id) ? 'not-allowed' : 'pointer',
+                  opacity: (isConnected || !config.agent_id) ? 0.5 : 1,
+                  boxShadow: (isConnected || !config.agent_id) ? 'none' : '0 8px 25px -8px rgba(59, 130, 246, 0.4)',
+                  transition: 'all 0.3s ease',
+                  transform: 'translateY(0)'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isConnected && config.agent_id) {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 12px 35px -8px rgba(59, 130, 246, 0.5)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isConnected && config.agent_id) {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 8px 25px -8px rgba(59, 130, 246, 0.4)';
+                  }
+                }}
+              >
+                {isConnected ? 'Session Active' : !config.agent_id ? 'Create Agent First' : 'Start Session'}
+              </button>
+            </div>
+          </div>
+
+          {/* Main Content Area */}
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '24px',
+            gap: '24px',
+            overflowY: 'auto',
+            background: '#ffffff'
+          }}>
+            
+            {/* Video Boxes Section */}
+            <div style={{
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '24px',
+              padding: '32px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              transition: 'all 0.3s ease'
+            }}>
+              <h2 style={{
+                fontSize: '18px',
+                fontWeight: '600',
+                margin: '0 0 24px 0',
+                color: '#2563eb',
+                textAlign: 'center'
+              }}>
+                Participants
+              </h2>
+              
+              {/* Two Boxes Row - Leftmost and Rightmost */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                marginBottom: '16px',
+                width: '100%',
+                paddingLeft: '20px',
+                paddingRight: '20px'
+              }}>
+                {/* User Box */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center'
+                }}>
+                  <div style={{
+                    position: 'relative',
+                    width: '280px',
+                    height: '200px',
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '20px',
+                    overflow: 'hidden',
+                    border: '2px solid rgba(59, 130, 246, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 8px 25px -8px rgba(59, 130, 246, 0.3)',
+                    transition: 'all 0.3s ease'
+                  }}>
+                    <div style={{
+                      width: '80px',
+                      height: '80px',
+                      borderRadius: '50%',
+                      background: 'linear-gradient(45deg, #3b82f6, #1d4ed8)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '32px',
+                      color: 'white'
+                    }}>
+                      👤
+                    </div>
                   </div>
-                ) : (
-                  // Show only the VERY LAST assistant message
-                  (() => {
-                    const lastAssistantMessage = recentMessages
-                      .filter(m => m.role === 'assistant')
-                      .slice(-1)[0];
-                    
-                    return lastAssistantMessage ? (
-                      <div key={lastAssistantMessage.id} className="transcript-text">
-                        {lastAssistantMessage.content}
-                        <div className="transcript-timestamp">
-                          {lastAssistantMessage.timestamp.toLocaleTimeString()}
+                  <div style={{
+                    marginTop: '8px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    color: '#2563eb'
+                  }}>
+                    User
+                  </div>
+                </div>
+
+                {/* Avatar Box */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center'
+                }}>
+                  <div style={{
+                    position: 'relative',
+                    width: '280px',
+                    height: '200px',
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    borderRadius: '20px',
+                    overflow: 'hidden',
+                    border: '2px solid rgba(59, 130, 246, 0.3)',
+                    boxShadow: '0 8px 25px -8px rgba(59, 130, 246, 0.3)',
+                    transition: 'all 0.3s ease'
+                  }}>
+                    <video 
+                      ref={videoRef} 
+                      autoPlay 
+                      playsInline 
+                      muted={false}
+                      controls={false}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover'
+                      }}
+                    />
+                    {!avatarConnected && !avatarLoading && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '12px',
+                        color: '#2563eb'
+                      }}>
+                        <div style={{
+                          fontSize: '32px',
+                          opacity: 0.6
+                        }}>
+                          🎭
+                        </div>
+                        <div style={{
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          textAlign: 'center'
+                        }}>
+                          Avatar Disconnected
                         </div>
                       </div>
+                    )}
+                    {avatarLoading && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '12px',
+                        color: '#60a5fa'
+                      }}>
+                        <div style={{
+                          fontSize: '24px',
+                          animation: 'spin 1s linear infinite'
+                        }}>
+                          ⏳
+                        </div>
+                        <div style={{
+                          fontSize: '12px',
+                          fontWeight: '500'
+                        }}>
+                          Connecting...
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{
+                    marginTop: '8px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    color: '#2563eb'
+                  }}>
+                    Avatar
+                  </div>
+                </div>
+              </div>
+
+              {/* Transcriptions Below Boxes - Aligned with Video Boxes */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                width: '100%',
+                paddingLeft: '20px',
+                paddingRight: '20px'
+              }}>
+                {/* User Transcription */}
+                <div style={{
+                  background: 'rgba(59, 130, 246, 0.05)',
+                  border: '1px solid rgba(59, 130, 246, 0.2)',
+                  borderRadius: '16px',
+                  padding: '16px',
+                  minHeight: '70px',
+                  width: '280px',
+                  boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.1)',
+                  transition: 'all 0.3s ease'
+                }}>
+                  <div style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#2563eb',
+                    marginBottom: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <span>👤</span>
+                    <span>USER</span>
+                  </div>
+                  <div style={{
+                    fontSize: '12px',
+                    lineHeight: '1.4',
+                    color: '#374151'
+                  }}>
+                    {(() => {
+                      const lastUserMessage = recentMessages
+                        .filter(m => m.role === 'user')
+                        .slice(-1)[0];
+                      
+                      return lastUserMessage ? (
+                        <div>
+                          {lastUserMessage.content}
+                          <div style={{
+                            fontSize: '10px',
+                            color: 'rgba(255, 255, 255, 0.5)',
+                            marginTop: '4px'
+                          }}>
+                            {lastUserMessage.timestamp.toLocaleTimeString()}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ color: '#2563eb', fontStyle: 'italic' }}>
+                          Start talking...
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Avatar Transcription */}
+                <div style={{
+                  background: 'rgba(34, 197, 94, 0.05)',
+                  border: '1px solid rgba(34, 197, 94, 0.2)',
+                  borderRadius: '16px',
+                  padding: '16px',
+                  minHeight: '70px',
+                  width: '280px',
+                  boxShadow: '0 4px 6px -1px rgba(34, 197, 94, 0.1)',
+                  transition: 'all 0.3s ease'
+                }}>
+                  <div style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#16a34a',
+                    marginBottom: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <span>🤖</span>
+                    <span>AVATAR</span>
+                    {currentAssistantMessage && (
+                      <span style={{
+                        fontSize: '10px',
+                        background: 'rgba(34, 197, 94, 0.2)',
+                        padding: '1px 6px',
+                        borderRadius: '8px',
+                        color: '#22c55e'
+                      }}>
+                        Speaking...
+                      </span>
+                    )}
+                  </div>
+                  <div style={{
+                    fontSize: '12px',
+                    lineHeight: '1.4',
+                    color: '#374151'
+                  }}>
+                    {currentAssistantMessage ? (
+                      <div>
+                        {currentAssistantMessage}
+                        <span style={{
+                          display: 'inline-block',
+                          width: '2px',
+                          height: '14px',
+                          background: '#22c55e',
+                          marginLeft: '4px',
+                          animation: 'blink 1s infinite'
+                        }} />
+                      </div>
                     ) : (
-                      <div className="transcript-placeholder">Waiting for response...</div>
-                    );
-                  })()
+                      (() => {
+                        const lastAssistantMessage = recentMessages
+                          .filter(m => m.role === 'assistant')
+                          .slice(-1)[0];
+                        
+                        return lastAssistantMessage ? (
+                          <div>
+                            {lastAssistantMessage.content}
+                            <div style={{
+                              fontSize: '10px',
+                              color: 'rgba(255, 255, 255, 0.5)',
+                              marginTop: '4px'
+                            }}>
+                              {lastAssistantMessage.timestamp.toLocaleTimeString()}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ color: '#2563eb', fontStyle: 'italic' }}>
+                            Waiting for response...
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Avatar Controls */}
+              <div style={{
+                marginTop: '20px',
+                display: 'flex',
+                justifyContent: 'center',
+                gap: '12px'
+              }}>
+                {!isConnected ? (
+                  <div style={{ color: '#2563eb', fontSize: '14px' }}>
+                    Start a session to connect avatar
+                  </div>
+                ) : avatarLoading ? (
+                  <button disabled style={{
+                    padding: '8px 16px',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#94a3b8',
+                    fontSize: '14px',
+                    cursor: 'not-allowed'
+                  }}>
+                    Connecting...
+                  </button>
+                ) : avatarConnected ? (
+                  <button onClick={disconnectAvatar} style={{
+                    padding: '8px 16px',
+                    background: 'linear-gradient(45deg, #ef4444, #dc2626)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: 'white',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)'
+                  }}>
+                    Disconnect Avatar
+                  </button>
+                ) : (
+                  <button onClick={connectAvatar} style={{
+                    padding: '8px 16px',
+                    background: 'linear-gradient(45deg, #22c55e, #16a34a)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: 'white',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(34, 197, 94, 0.3)'
+                  }}>
+                    Connect Avatar
+                  </button>
                 )}
               </div>
             </div>
 
-            {/* Avatar Video Box */}
-            <div className="avatar-video-box">
-              <div className="box-label">Avatar</div>
-              <video 
-                ref={videoRef} 
-                autoPlay 
-                playsInline 
-                muted={false}
-                controls={false}
-                className="avatar-video-small"
-              />
-              {!avatarConnected && !avatarLoading && (
-                <div className="video-placeholder">
-                  <div className="avatar-icon-large">
-                    <svg viewBox="0 0 100 100" className="avatar-icon-svg">
-                      <circle cx="50" cy="50" r="50" fill="#7B8A9E"/>
-                      <circle cx="50" cy="35" r="18" fill="#5A6A7E"/>
-                      <path d="M 15 85 Q 15 60 50 60 Q 85 60 85 85 Z" fill="#5A6A7E"/>
-                    </svg>
+            {/* Conversation Section */}
+            <div style={{
+              flex: 1,
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: '300px',
+              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              transition: 'all 0.3s ease'
+            }}>
+              <div style={{
+                padding: '20px 24px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <h3 style={{
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  margin: 0,
+                  color: '#2563eb'
+                }}>
+                  Conversation
+                </h3>
+                {messages.length > 0 && (
+                  <button 
+                    onClick={clearConversationHistory}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      borderRadius: '6px',
+                      color: '#dc2626',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Clear History
+                  </button>
+                )}
+              </div>
+              
+              <div style={{
+                flex: 1,
+                padding: '16px 24px',
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}>
+                {recentMessages.map((message) => (
+                  <div key={message.id} style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: message.role === 'user' ? 'flex-end' : 'flex-start'
+                  }}>
+                    <div style={{
+                      maxWidth: '80%',
+                      padding: '12px 16px',
+                      borderRadius: message.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                      background: message.role === 'user' 
+                        ? 'linear-gradient(45deg, #3b82f6, #1d4ed8)'
+                        : 'rgba(255, 255, 255, 0.1)',
+                      border: message.role === 'user' ? 'none' : '1px solid rgba(255, 255, 255, 0.2)',
+                      color: 'white',
+                      fontSize: '14px',
+                      lineHeight: '1.5'
+                    }}>
+                      <div style={{
+                        fontSize: '11px',
+                        opacity: 0.7,
+                        marginBottom: '4px',
+                        fontWeight: '500'
+                      }}>
+                        {message.role === 'user' ? '👤 You' : '🤖 Assistant'}
+                      </div>
+                      {message.content}
+                    </div>
+                    <div style={{
+                      fontSize: '11px',
+                      color: 'rgba(255, 255, 255, 0.5)',
+                      marginTop: '4px',
+                      marginLeft: message.role === 'user' ? '0' : '8px',
+                      marginRight: message.role === 'user' ? '8px' : '0'
+                    }}>
+                      {message.timestamp.toLocaleTimeString()}
+                    </div>
                   </div>
-                </div>
-              )}
-              {avatarLoading && (
-                <div className="video-loading">
-                  <div>⏳</div>
-                  <div>Connecting...</div>
-                </div>
-              )}
+                ))}
+                
+                {currentAssistantMessage && (
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start'
+                  }}>
+                    <div style={{
+                      maxWidth: '80%',
+                      padding: '12px 16px',
+                      borderRadius: '16px 16px 16px 4px',
+                      background: 'rgba(34, 197, 94, 0.2)',
+                      border: '1px solid rgba(34, 197, 94, 0.3)',
+                      color: 'white',
+                      fontSize: '14px',
+                      lineHeight: '1.5',
+                      position: 'relative'
+                    }}>
+                      <div style={{
+                        fontSize: '11px',
+                        opacity: 0.7,
+                        marginBottom: '4px',
+                        fontWeight: '500'
+                      }}>
+                        🤖 Assistant (speaking...)
+                      </div>
+                      {currentAssistantMessage}
+                      <span style={{
+                        display: 'inline-block',
+                        width: '2px',
+                        height: '16px',
+                        background: '#22c55e',
+                        marginLeft: '4px',
+                        animation: 'blink 1s infinite'
+                      }} />
+                    </div>
+                  </div>
+                )}
+                
+                <div ref={messagesEndRef} />
+              </div>
+              
+              {/* Input Section */}
+              <div style={{
+                padding: '20px 24px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+                display: 'flex',
+                gap: '12px',
+                alignItems: 'flex-end'
+              }}>
+                <button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  disabled={!isConnected}
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: isRecording 
+                      ? 'linear-gradient(45deg, #ef4444, #dc2626)'
+                      : isConnected 
+                        ? 'linear-gradient(45deg, #22c55e, #16a34a)'
+                        : 'rgba(255, 255, 255, 0.1)',
+                    color: 'white',
+                    fontSize: '20px',
+                    cursor: isConnected ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: isRecording ? '0 4px 15px rgba(239, 68, 68, 0.4)' : 'none',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {isRecording ? '⏹️' : '🎤'}
+                </button>
+                
+                <form onSubmit={handleTextSubmit} style={{
+                  flex: 1,
+                  display: 'flex',
+                  gap: '8px'
+                }}>
+                  <input
+                    type="text"
+                    name="message"
+                    placeholder="Type your message..."
+                    disabled={!isConnected}
+                    style={{
+                      flex: 1,
+                      padding: '12px 16px',
+                      background: '#ffffff',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '24px',
+                      color: '#374151',
+                      fontSize: '14px',
+                      outline: 'none'
+                    }}
+                  />
+                  <button 
+                    type="submit" 
+                    disabled={!isConnected}
+                    style={{
+                      padding: '12px 20px',
+                      background: isConnected 
+                        ? 'linear-gradient(45deg, #3b82f6, #1d4ed8)'
+                        : 'rgba(148, 163, 184, 0.3)',
+                      border: 'none',
+                      borderRadius: '24px',
+                      color: 'white',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      cursor: isConnected ? 'pointer' : 'not-allowed',
+                      boxShadow: isConnected ? '0 2px 8px rgba(59, 130, 246, 0.3)' : 'none'
+                    }}
+                  >
+                    Send
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         </div>
 
-          {/* Chat History Section - Show Recent Only */}
-          <div className="chat-section">
-            <div className="chat-header">
-              <span className="chat-icon">💬</span>
-              <span className="chat-title">Recent Conversation</span>
-              <div className="chat-controls">
-                <button 
-                  onClick={() => setShowFullHistory(!showFullHistory)} 
-                  className="btn-toggle"
-                  title={showFullHistory ? "Show recent only" : "Show full history"}
-                >
-                  {showFullHistory ? '📋 Recent' : '📜 Full'}
-                </button>
-                {messages.length > 8 && (
-                  <span className="message-count">
-                    {showFullHistory ? messages.length : recentMessages.length} messages
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="chat-messages">
-              {(showFullHistory ? messages : recentMessages).map((message) => (
-                <div key={message.id} className={`message ${message.role}`}>
-                  <div className="message-header">
-                    <span className="role">
-                      {message.role === 'user' ? '👤 You' : '🤖 Assistant'}
-                    </span>
-                    <span className="timestamp">
-                      {message.timestamp.toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <div className="message-content">{message.content}</div>
+        {/* Right Column - Configuration Panel */}
+        <div style={{
+          background: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100vh'
+        }}>
+          
+          {/* Configuration Header */}
+          <div style={{
+            padding: '24px',
+            borderBottom: '1px solid #e2e8f0',
+            background: '#ffffff',
+            flexShrink: 0,
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
+          }}>
+            <h2 style={{
+              fontSize: '20px',
+              fontWeight: '700',
+              margin: 0,
+              color: '#2563eb',
+              letterSpacing: '-0.3px'
+            }}>
+              Configuration
+            </h2>
+          </div>
+
+          {/* Configuration Content - Scrollable */}
+          <div style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '24px',
+            background: '#f8fafc'
+          }}>
+            
+            {/* Agent Status */}
+            {agentStatus.has_agent && (
+              <div style={{ 
+                marginBottom: '24px',
+                padding: '20px',
+                background: 'rgba(34, 197, 94, 0.1)',
+                border: '1px solid rgba(34, 197, 94, 0.3)',
+                borderRadius: '16px',
+                boxShadow: '0 4px 6px -1px rgba(34, 197, 94, 0.1)',
+                transition: 'all 0.3s ease'
+              }}>
+                <div style={{
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#22c55e',
+                  marginBottom: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  ✅ Agent Configured
                 </div>
-              ))}
-              <div ref={messagesEndRef} />
+                <div style={{
+                  fontSize: '12px',
+                  color: '#374151',
+                  marginBottom: '4px'
+                }}>
+                  Agent ID: {config.agent_id}
+                </div>
+                <div style={{
+                  fontSize: '12px',
+                  color: '#374151'
+                }}>
+                  Status: {agentStatus.ready_for_session ? 'Ready for sessions' : 'Configuration incomplete'}
+                </div>
+              </div>
+            )}
+            
+            {/* Agent Information */}
+            <div style={{ marginBottom: '32px' }}>
+              <div style={{
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#2563eb',
+                marginBottom: '16px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }}>
+                Agent Configuration
+              </div>
+              
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  color: '#2563eb',
+                  marginBottom: '6px'
+                }}>
+                  Model
+                </label>
+                <select
+                  value={config.model}
+                  onChange={(e) => updateConfig({ model: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: '#ffffff',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '12px',
+                    color: '#374151',
+                    fontSize: '14px',
+                    outline: 'none',
+                    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                  <option value="gpt-4o-realtime-preview">GPT-4o Realtime Preview</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  color: '#2563eb',
+                  marginBottom: '6px'
+                }}>
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={config.agent_name}
+                  onChange={(e) => updateConfig({ agent_name: e.target.value })}
+                  placeholder="Enter agent name..."
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: '#ffffff',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '12px',
+                    color: '#374151',
+                    fontSize: '14px',
+                    outline: 'none',
+                    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+                    transition: 'all 0.2s ease'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  color: '#2563eb',
+                  marginBottom: '6px'
+                }}>
+                  Instructions
+                </label>
+                <textarea
+                  value={config.instructions}
+                  onChange={(e) => updateConfig({ instructions: e.target.value })}
+                  placeholder="Enter instructions for the AI agent..."
+                  style={{
+                    width: '100%',
+                    height: '120px',
+                    padding: '12px 16px',
+                    background: '#ffffff',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '12px',
+                    color: '#374151',
+                    fontSize: '13px',
+                    lineHeight: '1.5',
+                    resize: 'vertical',
+                    fontFamily: 'inherit',
+                    outline: 'none',
+                    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+                    transition: 'all 0.2s ease'
+                  }}
+                />
+              </div>
+              
+              {config.agent_id && (
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{
+                    display: 'block',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    color: '#2563eb',
+                    marginBottom: '6px'
+                  }}>
+                    Current Agent ID
+                  </label>
+                  <div style={{
+                    padding: '12px 16px',
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                    borderRadius: '12px',
+                    color: '#22c55e',
+                    fontSize: '12px',
+                    fontFamily: 'monospace',
+                    wordBreak: 'break-all',
+                    boxShadow: '0 2px 4px 0 rgba(34, 197, 94, 0.1)'
+                  }}>
+                    {config.agent_id}
+                  </div>
+                </div>
+              )}
             </div>
 
-          <div className="input-section">
-            <div className="voice-controls">
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
               <button
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={!isConnected}
-                className={`btn-voice ${isRecording ? 'recording' : ''}`}
+                onClick={saveConfiguration}
+                style={{
+                  width: '100%',
+                  padding: '16px',
+                  background: agentStatus.has_agent 
+                    ? 'linear-gradient(45deg, #3b82f6, #1d4ed8)'
+                    : 'linear-gradient(45deg, #22c55e, #16a34a)',
+                  border: 'none',
+                  borderRadius: '16px',
+                  color: 'white',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  boxShadow: agentStatus.has_agent 
+                    ? '0 10px 25px -5px rgba(59, 130, 246, 0.4)'
+                    : '0 10px 25px -5px rgba(34, 197, 94, 0.4)',
+                  transition: 'all 0.3s ease',
+                  transform: 'translateY(0)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = agentStatus.has_agent 
+                    ? '0 15px 35px -5px rgba(59, 130, 246, 0.5)'
+                    : '0 15px 35px -5px rgba(34, 197, 94, 0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = agentStatus.has_agent 
+                    ? '0 10px 25px -5px rgba(59, 130, 246, 0.4)'
+                    : '0 10px 25px -5px rgba(34, 197, 94, 0.4)';
+                }}
               >
-                {isRecording ? '⏹️ Stop' : '🎤 Talk'}
+                {agentStatus.has_agent ? '🔄 Update Agent' : '🤖 Create Agent'}
               </button>
+              
+              {agentStatus.has_agent && (
+                <button
+                  onClick={async () => {
+                    if (confirm('Are you sure you want to reset the agent configuration? This will clear the current agent.')) {
+                      try {
+                        const response = await fetch('/api/config/agent', { method: 'DELETE' });
+                        if (response.ok) {
+                          setConfig(prev => ({ ...prev, agent_id: '' }));
+                          setAgentStatus({ has_agent: false, ready_for_session: false });
+                          alert('Agent configuration has been reset.');
+                        }
+                      } catch (error) {
+                        alert('Failed to reset agent configuration.');
+                      }
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: 'linear-gradient(45deg, #ef4444, #dc2626)',
+                    border: 'none',
+                    borderRadius: '12px',
+                    color: 'white',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    boxShadow: '0 6px 20px -5px rgba(239, 68, 68, 0.4)',
+                    transition: 'all 0.3s ease',
+                    transform: 'translateY(0)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.boxShadow = '0 10px 25px -5px rgba(239, 68, 68, 0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 6px 20px -5px rgba(239, 68, 68, 0.4)';
+                  }}
+                >
+                  🗑️ Reset Agent
+                </button>
+              )}
             </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes blink {
+          0%, 50% { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+        
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes slideInLeft {
+          from { opacity: 0; transform: translateX(-20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        
+        @keyframes slideInRight {
+          from { opacity: 0; transform: translateX(20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+        }
+        
+        body {
+          background: #ffffff;
+          margin: 0;
+          padding: 0;
+          animation: fadeIn 0.6s ease-out;
+        }
+        
+        /* Enhanced scrollbar */
+        ::-webkit-scrollbar {
+          width: 8px;
+        }
 
-            <form onSubmit={handleTextSubmit} className="text-input">
-              <input
-                type="text"
-                name="message"
-                placeholder="Type a message..."
-                disabled={!isConnected}
-                className="text-input-field"
-              />
-              <button type="submit" disabled={!isConnected} className="btn-send">
-                Send
-              </button>
-            </form>
-          </div>
-          </div>
-      </main>
+        ::-webkit-scrollbar-track {
+          background: rgba(0, 0, 0, 0.05);
+          border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+          background: linear-gradient(45deg, rgba(59, 130, 246, 0.3), rgba(59, 130, 246, 0.5));
+          border-radius: 4px;
+          transition: all 0.3s ease;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(45deg, rgba(59, 130, 246, 0.5), rgba(59, 130, 246, 0.7));
+        }
+        
+        /* Smooth focus transitions */
+        input:focus, textarea:focus, select:focus {
+          border-color: #3b82f6 !important;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+        }
+        
+        /* Button hover effects */
+        button:not(:disabled):hover {
+          transition: all 0.3s ease;
+        }
+        
+        /* Card hover effects */
+        .card-hover:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+      `}</style>
     </div>
+    </>
   );
 };
 

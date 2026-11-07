@@ -1,361 +1,261 @@
-# Voice Live AI Contact Center# Voice Agent with Avatar - Complete Project Structure
+<div align="center">
 
+# 🎙️ Voice Live AI Contact Center
 
+**Talk to an AI agent that talks back, with a real-time animated avatar.**
 
-A modern AI-powered contact center application using Azure Voice Live with real-time audio and avatar capabilities.This project provides a complete voice agent application with avatar support using Azure Voice Live API.
+Built on Azure Voice Live, FastAPI, and React.
 
+![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-TypeScript-61DAFB?logo=react&logoColor=black)
+![Azure](https://img.shields.io/badge/Azure-Voice%20Live-0078D4?logo=microsoftazure&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
+</div>
 
-## Features## Project Structure
+---
 
+## ✨ Overview
 
+Voice Live AI Contact Center is a full-stack reference application for building conversational voice agents. A user speaks (or types), the agent replies with low-latency synthesized speech, and an optional avatar delivers the response with synchronized lip-sync over WebRTC.
 
-- 🎙️ Real-time voice conversation with AI```
+The repository ships in three flavors so you can start at whatever level of complexity suits you:
 
-- 👤 Animated avatar supportvoiceagent/
+| Mode | Entry point | Best for |
+|------|-------------|----------|
+| 🌐 **Web app** | `backend/` + `frontend/` | The full experience: avatar video, live transcripts, text and voice input |
+| 🎧 **Audio-only terminal** | `voiceagent_audio_only.py` | Fastest way to test a conversation, no avatar or browser needed |
+| 🧑‍💻 **Avatar terminal** | `voiceagent.py` | Debugging avatar sessions with detailed event logging |
 
-- 💬 Text and voice input├── voiceagent.py              # Original voice agent with avatar (terminal)
+## 🚀 Features
 
-- 📊 Live transcription for both user and assistant├── voiceagent_audio_only.py   # Audio-only version (terminal)
+- **Real-time voice conversation** with an Azure-hosted AI agent
+- **Animated avatar** (default: *Lisa*, casual-sitting) streamed over WebRTC
+- **Voice and text input** in the same session
+- **Live transcription** for both the user and the assistant
+- **Clean audio**: 24 kHz streaming with Azure Deep Noise Suppression and server-side echo cancellation
+- **Session management** through a REST API plus WebSocket event streaming
+- **Responsive, modern UI** built with React, TypeScript, and Vite
 
-- 🔄 WebRTC integration for video streaming├── test_avatar_batch.py       # Avatar testing script
+## 🧭 Architecture
 
-- 🎨 Modern, responsive UI├── requirements.txt           # Python dependencies
+```mermaid
+flowchart LR
+    U[👤 User<br/>Mic / Text] --> F[React Frontend<br/>Vite + TypeScript]
+    F -- REST + WebSocket --> B[FastAPI Backend<br/>session_manager.py]
+    B --> C[voice_live_client.py]
+    C -- Audio + Events --> A[(Azure Voice Live API)]
+    A -- Avatar video via WebRTC --> F
+```
 
-├── backend/                   # FastAPI backend for web interface
+## 📁 Project Structure
 
-## Prerequisites│   ├── main.py               # FastAPI server with REST & WebSocket APIs
+```
+voiceagent/
+├── voiceagent.py              # Terminal voice agent with avatar support
+├── voiceagent_audio_only.py   # Terminal voice agent, direct audio playback
+├── test_avatar_batch.py       # Avatar configuration test script
+├── requirements.txt           # Python dependencies
+├── .env.example               # Environment variable template
+├── backend/                   # FastAPI server
+│   ├── main.py                # REST + WebSocket API
+│   ├── session_manager.py     # Voice Live session lifecycle
+│   └── voice_live_client.py   # Azure Voice Live client wrapper
+└── frontend/                  # React + TypeScript UI
+    ├── index.html
+    ├── package.json
+    ├── vite.config.ts
+    ├── tsconfig.json
+    └── src/
+        ├── main.tsx           # Entry point
+        ├── App.tsx            # Main component
+        ├── App.css            # Component styles
+        └── index.css          # Global styles
+```
 
-│   ├── session_manager.py    # Voice Live session management
-
-- Python 3.8+│   └── voice_live_client.py  # Azure Voice Live client wrapper
-
-- Node.js 16+└── frontend/                 # React TypeScript frontend
-
-- Azure subscription with Voice Live access    ├── src/
-
-- Azure credentials configured (DefaultAzureCredential)    │   ├── App.tsx           # Main React component
-
-    │   ├── App.css           # Styling
-
-## Setup    │   ├── main.tsx          # React entry point
-
-    │   └── index.css         # Global styles
-
-### 1. Clone the repository    ├── index.html            # HTML template
-
-    ├── package.json          # Node.js dependencies
-
-```bash    ├── vite.config.ts        # Vite build configuration
-
-git clone <your-repo-url>    ├── tsconfig.json         # TypeScript configuration
-
-cd voiceagent    └── tsconfig.node.json    # TypeScript config for build tools
-
-``````
-
-
-
-### 2. Configure environment variables## Features
-
-
-
-Copy the example environment file and fill in your Azure credentials:### 1. Terminal Voice Agent (`voiceagent.py`)
-
-- **Full avatar support** with Lisa character (casual-sitting style)
-
-```bash- **Audio delivered via WebRTC** (not directly in terminal)
-
-cp .env.example .env- **Real-time conversation** with Azure Voice Live API
-
-```- **Enhanced event logging** for debugging
-
-
-
-Edit `.env` and add your Azure Voice Live configuration:### 2. Audio-Only Version (`voiceagent_audio_only.py`)
-
-- **Direct audio playback** in terminal
-
-```env- **Reliable voice conversations** without avatar complexity
-
-AZURE_VOICE_LIVE_ENDPOINT=https://your-endpoint.cognitiveservices.azure.com/- **WebSocket audio streaming**
-
-AZURE_VOICE_LIVE_AGENT_ID=your_agent_id- **Immediate testing capability**
-
-AZURE_VOICE_LIVE_AGENT_CONNECTION_STRING=region.api.azureml.ms;workspace-id;resource-group;project-name
-
-# ... (see .env.example for all required variables)### 3. Web Application
-
-```- **FastAPI backend** with session management
-
-- **React frontend** with avatar video display
-
-### 3. Install Python dependencies- **WebRTC integration** for avatar video streams
-
-- **Real-time audio and text communication**
-
-```bash- **Modern responsive UI**
-
-pip install -r requirements.txt
-
-```## Setup Instructions
-
-
-
-### 4. Install frontend dependencies### Prerequisites
+## ✅ Prerequisites
 
 - Python 3.8+
+- Node.js 18+
+- An Azure subscription with access to Azure Voice Live
+- Azure credentials available to `DefaultAzureCredential` (see [Authentication](#-authentication))
 
-```bash- Node.js 18+
+## ⚡ Quick Start
 
-cd frontend- Azure Cognitive Services account
-
-npm install- Azure Voice Live API access
-
-cd ..
-
-```### Backend Setup
-
-
-
-### 5. Run the application1. **Install Python dependencies:**
+### 1. Clone
 
 ```bash
-
-**Option 1: Simple script (recommended for testing)**pip install -r requirements.txt
-
+git clone <your-repo-url>
+cd voiceagent
 ```
 
+### 2. Configure environment
+
 ```bash
+cp .env.example .env
+```
 
-python voiceagent.py2. **Configure environment variables:**
-
-```Create a `.env` file with your Azure credentials:
+Fill in `.env` with your values:
 
 ```env
-
-This will start both the backend server and frontend development server.AZURE_VOICE_LIVE_ENDPOINT=https://your-endpoint.cognitiveservices.azure.com/
-
+AZURE_VOICE_LIVE_ENDPOINT=https://your-endpoint.cognitiveservices.azure.com/
 AZURE_VOICE_LIVE_AGENT_ID=your-agent-id
-
-**Option 2: Manual setup**AZURE_VOICE_LIVE_AGENT_CONNECTION_STRING=your-connection-string
-
+AZURE_VOICE_LIVE_AGENT_CONNECTION_STRING=region.api.azureml.ms;workspace-id;resource-group;project-name
 AZURE_VOICE_LIVE_API_VERSION=2025-10-01
-
-Start the backend server:AZURE_TTS_VOICE=en-IN-AartiIndicNeural
-
-```bashAZURE_VOICE_AVATAR_CHARACTER=lisa
-
-cd backendAZURE_VOICE_AVATAR_STYLE=casual-sitting
-
-uvicorn main:app --host 0.0.0.0 --port 3000 --reload```
-
+AZURE_TTS_VOICE=en-IN-AartiIndicNeural
+AZURE_VOICE_AVATAR_CHARACTER=lisa
+AZURE_VOICE_AVATAR_STYLE=casual-sitting
 ```
 
-3. **Run the FastAPI backend:**
+> 🔒 **Never commit `.env`.** Confirm it is listed in `.gitignore`.
 
-In a separate terminal, start the frontend:```bash
-
-```bashcd backend
-
-cd frontendpython -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-npm run dev```
-
-```
-
-### Frontend Setup
-
-## Usage
-
-1. **Install Node.js dependencies:**
-
-1. Open your browser to `http://localhost:5173` (or the URL shown by Vite)```bash
-
-2. Click "Start Session" to initialize the connectioncd frontend
-
-3. Click "Connect Avatar" to enable video avatarnpm install
-
-4. Use the microphone button to speak or type messages in the text input```
-
-5. View real-time transcriptions and conversation history
-
-2. **Start the development server:**
-
-## Project Structure```bash
-
-npm start
-
-``````
-
-voiceagent/
-
-├── backend/The frontend will be available at `http://localhost:3000`
-
-│   ├── main.py                 # FastAPI server
-
-│   ├── voice_live_client.py   # Azure Voice Live client### Terminal Testing
-
-│   └── session_manager.py     # Session management
-
-├── frontend/1. **Test avatar configuration:**
-
-│   ├── src/```bash
-
-│   │   ├── App.tsx            # Main React componentpython test_avatar_batch.py
-
-│   │   └── App.css            # Styling```
-
-│   └── package.json
-
-├── voiceagent.py              # Simple launcher script2. **Test audio-only conversation:**
-
-├── requirements.txt           # Python dependencies```bash
-
-└── .env.example              # Environment templatepython voiceagent_audio_only.py
-
-``````
-
-
-
-## Environment Variables3. **Test full avatar version:**
+### 3. Install dependencies
 
 ```bash
+pip install -r requirements.txt
+cd frontend && npm install && cd ..
+```
 
-| Variable | Description | Required |python voiceagent.py
+### 4. Run the web app
 
-|----------|-------------|----------|```
+Start the backend:
 
-| `AZURE_VOICE_LIVE_ENDPOINT` | Azure Voice Live endpoint URL | Yes |
+```bash
+cd backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
 
-| `AZURE_VOICE_LIVE_AGENT_ID` | Your agent ID | Yes |## Usage
+In a second terminal, start the frontend:
 
-| `AZURE_VOICE_LIVE_AGENT_CONNECTION_STRING` | Agent connection string | Yes |
+```bash
+cd frontend
+npm run dev
+```
 
-| `AZURE_VOICE_LIVE_API_VERSION` | API version (e.g., 2025-10-01) | Yes |### Web Application
+Open the URL Vite prints (typically `http://localhost:5173`).
 
-| `AZURE_TTS_VOICE` | Azure TTS voice name | Yes |1. Open `http://localhost:3000` in your browser
+### 5. Use it
 
-| `AZURE_VOICE_AVATAR_CHARACTER` | Avatar character name | Yes |2. Click "Start Session" to initialize the voice agent
+1. Click **Start Session** to initialize the voice agent.
+2. Click **Connect Avatar** to open the WebRTC video stream.
+3. Speak with the microphone button, or type a message.
+4. Watch the avatar respond, with live transcripts for both sides.
 
-| `AZURE_VOICE_AVATAR_STYLE` | Avatar style | Yes |3. Click "Connect Avatar" to establish WebRTC video connection
+## 🖥️ Terminal Modes
 
-| `AZURE_VOICE_AVATAR_WIDTH` | Video width in pixels | Yes |4. Use the microphone button to talk or type messages
+Useful for quick tests without the browser:
 
-| `AZURE_VOICE_AVATAR_HEIGHT` | Video height in pixels | Yes |5. Watch the avatar respond with synchronized video and audio
+```bash
+python test_avatar_batch.py        # Validate avatar configuration
+python voiceagent_audio_only.py    # Reliable voice chat with direct audio playback
+python voiceagent.py               # Avatar session with enhanced event logging
+```
 
-| `AZURE_VOICE_AVATAR_BITRATE` | Video bitrate | Yes |
+> ℹ️ In avatar mode, audio is delivered over WebRTC, so it will not play directly in the terminal. Use the audio-only script for that. Press `q` + Enter to quit.
 
-| `AZURE_VOICE_AVATAR_ICE_URLS` | Custom ICE servers (optional) | No |### Terminal Application
+## ⚙️ Configuration
 
-1. Run `python voiceagent_audio_only.py` for reliable voice chat
+| Variable | Description | Required |
+|----------|-------------|:--------:|
+| `AZURE_VOICE_LIVE_ENDPOINT` | Azure Voice Live endpoint URL | ✅ |
+| `AZURE_VOICE_LIVE_AGENT_ID` | Your agent ID | ✅ |
+| `AZURE_VOICE_LIVE_AGENT_CONNECTION_STRING` | Agent connection string | ✅ |
+| `AZURE_VOICE_LIVE_API_VERSION` | API version, e.g. `2025-10-01` | ✅ |
+| `AZURE_TTS_VOICE` | Azure TTS voice name | ✅ |
+| `AZURE_VOICE_AVATAR_CHARACTER` | Avatar character, e.g. `lisa` | ✅ |
+| `AZURE_VOICE_AVATAR_STYLE` | Avatar style, e.g. `casual-sitting` | ✅ |
+| `AZURE_VOICE_AVATAR_WIDTH` | Video width in pixels (default setup: 1280) | ✅ |
+| `AZURE_VOICE_AVATAR_HEIGHT` | Video height in pixels (default setup: 720) | ✅ |
+| `AZURE_VOICE_AVATAR_BITRATE` | Video bitrate (default setup: 2 Mbps) | ✅ |
+| `AZURE_VOICE_AVATAR_ICE_URLS` | Custom ICE/TURN servers | ➖ |
 
-## Authentication2. Run `python voiceagent.py` for avatar-enabled session (requires WebRTC frontend)
+## 🔐 Authentication
 
-3. Press 'q' and Enter to quit
+The app uses [`DefaultAzureCredential`](https://learn.microsoft.com/azure/developer/python/sdk/authentication/overview) and requests tokens for both `https://ai.azure.com/.default` and `https://ml.azure.com/.default`, with automatic refresh. Authenticate using any one of:
 
-This application uses `DefaultAzureCredential` from Azure Identity. Make sure you're authenticated using one of:
+- **Azure CLI:** `az login` (simplest for local development)
+- **Environment variables:** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`
+- **Managed Identity:** when deployed on Azure
 
-## Technical Details
+## 🔌 API Reference
 
-- Azure CLI: `az login`
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/session` | Create a new voice session |
+| `GET` | `/api/session/{session_id}` | Get session status |
+| `POST` | `/api/session/{session_id}/avatar/connect` | Connect the avatar via WebRTC |
+| `POST` | `/api/session/{session_id}/message` | Send a text message |
+| `WS` | `/api/ws/{session_id}` | Stream real-time events |
 
-- Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)### Authentication
+## 🛠️ Troubleshooting
 
-- Managed Identity (when deployed to Azure)- Uses `DefaultAzureCredential` for Azure authentication
+<details>
+<summary><b>Avatar not connecting</b></summary>
 
-- Requires both `https://ai.azure.com/.default` and `https://ml.azure.com/.default` scopes
+- Confirm your browser supports WebRTC.
+- Check firewall rules for UDP traffic.
+- Review your ICE server configuration (`AZURE_VOICE_AVATAR_ICE_URLS`).
+</details>
 
-## Troubleshooting- Automatic token refresh handling
+<details>
+<summary><b>No audio</b></summary>
 
+- In the terminal, use `voiceagent_audio_only.py`; the avatar script streams audio via WebRTC only.
+- In the browser, check microphone permissions and that no other app is using the mic.
+- Open the browser console for errors.
+</details>
 
+<details>
+<summary><b>Session or WebSocket connection fails</b></summary>
 
-### Avatar not connecting### Audio Processing
+- Verify every environment variable is set and correct, especially the agent ID and connection string.
+- Confirm your Azure credentials are valid (`az login`).
+- Check the backend logs for details.
+</details>
 
-- Check your ICE server configuration- **24kHz sample rate** for optimal quality
+<details>
+<summary><b>Enable verbose logging</b></summary>
 
-- Verify network connectivity- **Real-time audio streaming** with minimal latency
-
-- Ensure WebRTC is supported in your browser- **Azure Deep Noise Suppression** for clear audio
-
-- **Server Echo Cancellation** for better conversation flow
-
-### Audio not working
-
-- Check microphone permissions in your browser### Avatar Features
-
-- Verify audio device is working- **Lisa character** with casual-sitting style
-
-- Check browser console for errors- **1280x720 resolution** at 2Mbps bitrate
-
-- **WebRTC video streaming** for real-time avatar display
-
-### Session connection fails- **Synchronized lip-sync** with audio response
-
-- Verify all environment variables are set correctly
-
-- Check Azure credentials are valid### API Endpoints
-
-- Review backend logs for detailed error messages- `POST /api/session` - Create new voice session
-
-- `GET /api/session/{session_id}` - Get session status
-
-## License- `POST /api/session/{session_id}/avatar/connect` - Connect avatar via WebRTC
-
-- `POST /api/session/{session_id}/message` - Send text message
-
-MIT- `WebSocket /api/ws/{session_id}` - Real-time event streaming
-
-
-
-## Contributing## Troubleshooting
-
-
-
-Pull requests are welcome! Please ensure all sensitive information is removed before committing.### Common Issues
-
-
-1. **Audio not working in terminal:**
-   - Use `voiceagent_audio_only.py` for direct audio playback
-   - Avatar version requires WebRTC frontend for audio
-
-2. **WebSocket connection failed:**
-   - Check Azure credentials and endpoint configuration
-   - Verify agent ID and connection string are correct
-
-3. **Avatar not connecting:**
-   - Ensure WebRTC is supported in your browser
-   - Check firewall settings for UDP traffic
-
-4. **No microphone access:**
-   - Grant microphone permissions in browser
-   - Check microphone is not being used by another application
-
-### Debug Mode
-Add verbose logging for troubleshooting:
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
 ```
+</details>
 
-## Development
+## 👩‍💻 Development
 
-### Adding New Features
-1. Backend changes go in `backend/main.py` or `session_manager.py`
-2. Frontend changes go in `frontend/src/App.tsx`
-3. Voice agent logic updates go in `voice_live_client.py`
+| To change... | Edit |
+|--------------|------|
+| API routes, WebSocket handling | `backend/main.py` |
+| Session lifecycle | `backend/session_manager.py` |
+| Voice agent / Azure client logic | `backend/voice_live_client.py` |
+| UI and behavior | `frontend/src/App.tsx` |
 
-### Building for Production
+**Production build**
+
 ```bash
-# Build frontend
-cd frontend
-npm run build
+# Frontend
+cd frontend && npm run build
 
-# Deploy backend with production ASGI server
+# Backend
 pip install gunicorn
 gunicorn backend.main:app -w 4 -k uvicorn.workers.UvicornWorker
 ```
 
-## License
+## 🤝 Responsible Use
 
-This project is for educational and development purposes. Please ensure compliance with Azure service terms and conditions.
+This project handles live voice audio and presents an AI persona. If you deploy it, please:
+
+- **Disclose that users are talking to an AI**, not a human.
+- **Obtain consent** before recording or transcribing conversations, and follow applicable privacy laws (e.g. GDPR).
+- **Protect data**: keep credentials out of source control, and limit retention of audio and transcripts.
+- **Comply with Azure's terms** and the [Azure AI Services responsible-use guidelines](https://learn.microsoft.com/azure/ai-services/responsible-use-of-ai-overview).
+
+## 🧑‍🤝‍🧑 Contributing
+
+Pull requests are welcome. Before committing, make sure all secrets, keys, and personal data are removed.
+
+## 📄 License
+
+Released under the [MIT License](LICENSE).
